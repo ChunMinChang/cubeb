@@ -700,7 +700,7 @@ audiounit_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
 }
 
 static int
-audiounit_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms)
+audiounit_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_frames)
 {
 #if TARGET_OS_IPHONE
   //TODO: [[AVAudioSession sharedInstance] inputLatency]
@@ -711,7 +711,7 @@ audiounit_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * la
     return CUBEB_ERROR;
   }
 
-  *latency_ms = (latency_range.mMinimum * 1000 + params.rate - 1) / params.rate;
+  *latency_frames = latency_range.mMinimum;
 #endif
 
   return CUBEB_OK;
@@ -901,7 +901,7 @@ audiounit_stream_init(cubeb * context,
                       cubeb_stream_params * input_stream_params,
                       cubeb_devid output_device,
                       cubeb_stream_params * output_stream_params,
-                      unsigned int latency,
+                      unsigned int latency_frames,
                       cubeb_data_callback data_callback,
                       cubeb_state_callback state_callback,
                       void * user_ptr)
@@ -1100,7 +1100,7 @@ audiounit_stream_init(cubeb * context,
   // Setting the latency doesn't work well for USB headsets (eg. plantronics).
   // Keep the default latency for now.
 #if 0
-  buffer_size = latency / 1000.0 * ss.mSampleRate;
+  buffer_size = latency;
 
   /* Get the range of latency this particular device can work with, and clamp
    * the requested latency to this acceptable range. */
@@ -1744,11 +1744,11 @@ audiounit_create_device_from_hwdev(AudioObjectID devid, cubeb_device_type type)
   adr.mSelector = kAudioDevicePropertyBufferFrameSizeRange;
   size = sizeof(AudioValueRange);
   if (AudioObjectGetPropertyData(devid, &adr, 0, NULL, &size, &range) == noErr) {
-    ret->latency_lo_ms = ((latency + range.mMinimum) * 1000) / ret->default_rate;
-    ret->latency_hi_ms = ((latency + range.mMaximum) * 1000) / ret->default_rate;
+    ret->latency_lo = latency + range.mMinimum;
+    ret->latency_hi = latency + range.mMaximum;
   } else {
-    ret->latency_lo_ms = 10;  /* Default to  10ms */
-    ret->latency_hi_ms = 100; /* Default to 100ms */
+    ret->latency_lo = 10 * ret->default_rate / 1000;  /* Default to  10ms */
+    ret->latency_hi = 100 * ret->default_rate / 1000; /* Default to 100ms */
   }
 
   return ret;
