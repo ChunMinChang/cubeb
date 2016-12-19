@@ -115,6 +115,7 @@ struct cubeb_stream {
   pa_sample_spec input_sample_spec;
   int shutdown;
   float volume;
+  bool need_mix;
   cubeb_state state;
 };
 
@@ -254,6 +255,15 @@ trigger_user_callback(pa_stream * s, void const * input_data, size_t nbytes, cub
           b[i] *= stm->volume;
         }
       }
+    }
+
+    if (stm->need_mix) {
+      printf("!!!!! MIX the audio here !!!!!\n");
+      printf("!!!!! format: %s\n", (stm->output_sample_spec.format == PA_SAMPLE_S16BE || stm->output_sample_spec.format == PA_SAMPLE_S16LE)? "short" : "float");
+      // cubeb_downmix_float
+      // cubeb_upmix_float
+      // cubeb_downmix_short
+      // cubeb_upmix_short
     }
 
     r = WRAP(pa_stream_write)(s, buffer, got * frame_size, NULL, 0, PA_SEEK_RELATIVE);
@@ -692,6 +702,27 @@ map_to_pa_channel(cubeb_channel channel)
   return map[channel];
 }
 
+static cubeb_channel
+map_to_cubeb_channel(pa_channel_position_t channel)
+{
+  assert(channel != PA_CHANNEL_POSITION_INVALID);
+  switch(channel) {
+    case PA_CHANNEL_POSITION_MONO: return CHANNEL_MONO;
+    case PA_CHANNEL_POSITION_FRONT_LEFT: return CHANNEL_LEFT;
+    case PA_CHANNEL_POSITION_FRONT_RIGHT: return CHANNEL_RIGHT;
+    case PA_CHANNEL_POSITION_FRONT_CENTER: return CHANNEL_CENTER;
+    case PA_CHANNEL_POSITION_SIDE_LEFT: return CHANNEL_LS;
+    case PA_CHANNEL_POSITION_SIDE_RIGHT: return CHANNEL_RS;
+    case PA_CHANNEL_POSITION_REAR_LEFT: return CHANNEL_RLS;
+    case PA_CHANNEL_POSITION_REAR_CENTER: return CHANNEL_RCENTER;
+    case PA_CHANNEL_POSITION_REAR_RIGHT: return CHANNEL_RRS;
+    case PA_CHANNEL_POSITION_LFE: return CHANNEL_LFE;
+    default:
+      assert(false && "invalid channel!");
+      return CHANNEL_INVALID;
+  }
+}
+
 void
 to_pulse_channel_map(cubeb_channel_layout layout, pa_channel_map * cm)
 {
@@ -702,6 +733,52 @@ to_pulse_channel_map(cubeb_channel_layout layout, pa_channel_map * cm)
   for (uint8_t i = 0 ; i < cm->channels ; ++i) {
     cm->map[i] = map_to_pa_channel(CHANNEL_INDEX_TO_ORDER[layout][i]);
   }
+}
+
+// DUAL_MONO and DUAL_MONO_LFE are same as STEREO and STEREO_LFE.
+#define MASK_MONO         (1 << CHANNEL_MONO)
+#define MASK_MONO_LFE     (MASK_MONO | (1 << CHANNEL_LFE))
+#define MASK_STEREO       ((1 << CHANNEL_LEFT) | (1 << CHANNEL_RIGHT))
+#define MASK_STEREO_LFE   (MASK_STEREO | (1 << CHANNEL_LFE))
+#define MASK_3F           (MASK_STEREO | (1 << CHANNEL_CENTER))
+#define MASK_3F_LFE       (MASK_3F | (1 << CHANNEL_LFE))
+#define MASK_2F1          (MASK_STEREO | (1 << CHANNEL_RCENTER))
+#define MASK_2F1_LFE      (MASK_2F1 | (1 << CHANNEL_LFE))
+#define MASK_3F1          (MASK_3F | (1 << CHANNEL_RCENTER))
+#define MASK_3F1_LFE      (MASK_3F1 | (1 << CHANNEL_LFE))
+#define MASK_2F2          (MASK_STEREO | (1 << CHANNEL_LS) | (1 << CHANNEL_RS))
+#define MASK_2F2_LFE      (MASK_2F2 | (1 << CHANNEL_LFE))
+#define MASK_3F2          (MASK_2F2 | (1 << CHANNEL_CENTER))
+#define MASK_3F2_LFE      (MASK_3F2 | (1 << CHANNEL_LFE))
+#define MASK_3F3R_LFE     (MASK_3F2_LFE | (1 << CHANNEL_RCENTER))
+#define MASK_3F4_LFE      (MASK_3F2_LFE | (1 << CHANNEL_RLS) | (1 << CHANNEL_RRS))
+
+static cubeb_channel_layout
+channel_map_to_layout(pa_channel_map * cm)
+{
+  uint32_t channel_mask = 0;
+  for (uint8_t i = 0 ; i < cm->channels ; ++i) {
+    channel_mask |= 1 << map_to_cubeb_channel(cm->map[i]);
+  }
+  switch(channel_mask) {
+    case MASK_MONO: return CUBEB_LAYOUT_MONO;
+    case MASK_MONO_LFE: return CUBEB_LAYOUT_MONO_LFE;
+    case MASK_STEREO: return CUBEB_LAYOUT_STEREO;
+    case MASK_STEREO_LFE: return CUBEB_LAYOUT_STEREO_LFE;
+    case MASK_3F: return CUBEB_LAYOUT_3F;
+    case MASK_3F_LFE: return CUBEB_LAYOUT_3F_LFE;
+    case MASK_2F1: return CUBEB_LAYOUT_2F1;
+    case MASK_2F1_LFE: return CUBEB_LAYOUT_2F1_LFE;
+    case MASK_3F1: return CUBEB_LAYOUT_3F1;
+    case MASK_3F1_LFE: return CUBEB_LAYOUT_3F1_LFE;
+    case MASK_2F2: return CUBEB_LAYOUT_2F2;
+    case MASK_2F2_LFE: return CUBEB_LAYOUT_2F2_LFE;
+    case MASK_3F2: return CUBEB_LAYOUT_3F2;
+    case MASK_3F2_LFE: return CUBEB_LAYOUT_3F2_LFE;
+    case MASK_3F3R_LFE: return CUBEB_LAYOUT_3F3R_LFE;
+    case MASK_3F4_LFE: return CUBEB_LAYOUT_3F4_LFE;
+  }
+  return CUBEB_LAYOUT_UNSUPPORTED;
 }
 
 static int
@@ -778,10 +855,32 @@ pulse_stream_init(cubeb * context,
   stm->user_ptr = user_ptr;
   stm->volume = PULSE_NO_GAIN;
   stm->state = -1;
+  stm->need_mix = false;
   assert(stm->shutdown == 0);
 
   WRAP(pa_threaded_mainloop_lock)(stm->context->mainloop);
   if (output_stream_params) {
+    // Ensure we already get default_sink_info.
+    while (!stm->context->default_sink_info) {
+      WRAP(pa_threaded_mainloop_wait)(stm->context->mainloop);
+    }
+
+    uint8_t device_channels = stm->context->default_sink_info->channel_map.channels;
+    cubeb_channel_layout device_layout =
+      channel_map_to_layout(&stm->context->default_sink_info->channel_map);
+    printf("  Device> channels: %d, layout: %s\n"
+           "  Format> channels: %d, layout: %s\n",
+           device_channels, CUBEB_CHANNEL_LAYOUT_MAPS[device_layout].name,
+           output_stream_params->channels,
+           CUBEB_CHANNEL_LAYOUT_MAPS[output_stream_params->layout].name);
+    if (device_channels != output_stream_params->channels ||
+        device_layout != output_stream_params->layout) {
+      printf("    Need mixing! pass default device setting to create_pa_stream!\n");
+      stm->need_mix = true;
+      // output_stream_params->channels = device_channels;
+      // output_stream_params->layout = device_layout;
+    }
+
     r = create_pa_stream(stm, &stm->output_stream, output_stream_params, stream_name);
     if (r != CUBEB_OK) {
       WRAP(pa_threaded_mainloop_unlock)(stm->context->mainloop);

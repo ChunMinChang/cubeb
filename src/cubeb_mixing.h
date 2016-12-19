@@ -63,6 +63,13 @@ void cubeb_downmix_float(float * const in, const long inframes, float * out,
 void cubeb_upmix_float(float * const in, const long inframes, float * out,
                        const unsigned int in_channels, const unsigned int out_channels);
 
+void cubeb_downmix_short(short * const in, const long inframes, short * out,
+                         const unsigned int in_channels, const unsigned int out_channels,
+                         const cubeb_channel_layout in_layout, const cubeb_channel_layout out_layout);
+
+void cubeb_upmix_short(short * const in, const long inframes, short * out,
+                       const unsigned int in_channels, const unsigned int out_channels);
+
 #if defined(__cplusplus)
 }
 #endif

@@ -321,3 +321,18 @@ cubeb_upmix_float(float * const in, const long inframes, float * out,
 {
   cubeb_upmix(in, inframes, out, in_channels, out_channels);
 }
+
+void
+cubeb_downmix_short(short * const in, const long inframes, short * out,
+                    const unsigned int in_channels, const unsigned int out_channels,
+                    const cubeb_channel_layout in_layout, const cubeb_channel_layout out_layout)
+{
+  cubeb_downmix(in, inframes, out, in_channels, out_channels, in_layout, out_layout);
+}
+
+void
+cubeb_upmix_short(short * const in, const long inframes, short * out,
+                  const unsigned int in_channels, const unsigned int out_channels)
+{
+  cubeb_upmix(in, inframes, out, in_channels, out_channels);
+}
