@@ -33,6 +33,7 @@ endif()
 
 add_library(cubeb
   src/cubeb.c
+  src/cubeb_mixing.cpp
   src/cubeb_resampler.cpp
   src/cubeb_panner.cpp
    $<TARGET_OBJECTS:speex>)
@@ -198,6 +199,12 @@ target_include_directories(test_ring_array PRIVATE ${gtest_SOURCE_DIR}/include)
 target_include_directories(test_ring_array PRIVATE src)
 target_link_libraries(test_ring_array PRIVATE cubeb gtest_main)
 add_test(ring_array test_ring_array)
+
+add_executable(test_mixing test/test_mixing.cpp)
+target_include_directories(test_mixing PRIVATE ${gtest_SOURCE_DIR}/include)
+target_include_directories(test_mixing PRIVATE src)
+target_link_libraries(test_mixing PRIVATE cubeb gtest_main)
+add_test(mixing test_mixing)
 
 add_executable(test_utils test/test_utils.cpp)
 target_include_directories(test_utils PRIVATE ${gtest_SOURCE_DIR}/include)
