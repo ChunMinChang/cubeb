@@ -107,4 +107,15 @@ void print_log(const char * msg, ...)
   va_end(args);
 }
 
+uint64_t current_thread_id()
+{
+#if defined(_WIN32)
+  return static_cast<uint64_t>(GetCurrentThreadId());
+#else
+  uint64_t tid;
+  pthread_threadid_np(NULL, &tid);
+  return tid;
+#endif
+}
+
 #endif /* TEST_COMMON */
