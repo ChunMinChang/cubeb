@@ -1336,6 +1336,130 @@ wasapi_get_preferred_sample_rate(cubeb * ctx, uint32_t * rate)
   return CUBEB_OK;
 }
 
+// ============================================================================
+//-----------------------------------------------------------
+// This function enumerates all active (plugged in) audio
+// rendering endpoint devices. It prints the friendly name
+// and endpoint ID string of each endpoint device.
+//-----------------------------------------------------------
+#define EXIT_ON_ERROR(hres)  \
+              if (FAILED(hres)) { goto Exit; }
+#define SAFE_RELEASE(punk)  \
+              if ((punk) != NULL)  \
+                { (punk)->Release(); (punk) = NULL; }
+
+const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
+const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
+
+// References:
+// https://github.com/pothosware/SoapyAudio/blob/master/RtAudio/FunctionDiscoveryKeys_devpkey.h
+// https://hackage.haskell.org/package/bindings-portaudio-0.1/src/portaudio/src/hostapi/wasapi/mingw-include/FunctionDiscoveryKeys_devpkey.h
+#ifndef PKEY_Device_DeviceDesc
+DEFINE_PROPERTYKEY(PKEY_Device_DeviceDesc, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 2);            // DEVPROP_TYPE_STRING
+#endif
+#ifndef PKEY_DeviceInterface_FriendlyName
+DEFINE_PROPERTYKEY(PKEY_DeviceInterface_FriendlyName, 0x026e516e, 0xb814, 0x414b, 0x83, 0xcd, 0x85, 0x6d, 0x6f, 0xef, 0x48, 0x22, 2); // DEVPROP_TYPE_STRING
+#endif
+
+static void
+PrintEndpointNames()
+{
+  HRESULT hr = S_OK;
+  IMMDeviceEnumerator *pEnumerator = NULL;
+  IMMDeviceCollection *pCollection = NULL;
+  IMMDevice *pEndpoint = NULL;
+  IPropertyStore *pProps = NULL;
+  LPWSTR pwszID = NULL;
+
+  hr = CoCreateInstance(
+    CLSID_MMDeviceEnumerator, 
+    NULL,
+    CLSCTX_ALL, 
+    IID_IMMDeviceEnumerator,
+    (void**)&pEnumerator);
+  EXIT_ON_ERROR(hr)
+
+  hr = pEnumerator->EnumAudioEndpoints(
+    eRender, 
+    DEVICE_STATE_ACTIVE,
+    &pCollection);
+  EXIT_ON_ERROR(hr)
+
+  UINT count;
+  hr = pCollection->GetCount(&count);
+  EXIT_ON_ERROR(hr)
+
+  if (!count) {
+    printf("No endpoints found.\n");
+  }
+
+  // Each loop prints the name of an endpoint device.
+  for (ULONG i = 0; i < count; ++i) {
+    // Get pointer to endpoint number i.
+    hr = pCollection->Item(i, &pEndpoint);
+    EXIT_ON_ERROR(hr)
+
+    // Get the endpoint ID string.
+    hr = pEndpoint->GetId(&pwszID);
+    EXIT_ON_ERROR(hr)
+
+    hr = pEndpoint->OpenPropertyStore(STGM_READ, &pProps);
+    EXIT_ON_ERROR(hr)
+
+    // -------- Device Name --------
+    PROPVARIANT varName;
+    // Initialize container for property value.
+    PropVariantInit(&varName);
+
+    // Get the endpoint's friendly-name property.
+    hr = pProps->GetValue(PKEY_Device_FriendlyName, &varName);
+    EXIT_ON_ERROR(hr)
+
+    // -------- Device Description --------
+    PROPVARIANT varDesc;
+    // Initialize container for property value.
+    PropVariantInit(&varDesc);
+
+    // Get the endpoint's description property.
+    hr = pProps->GetValue(PKEY_Device_DeviceDesc, &varDesc);
+    EXIT_ON_ERROR(hr)
+
+    // -------- Device Interface Name --------
+    PROPVARIANT varIFName;
+    // Initialize container for property value.
+    PropVariantInit(&varIFName);
+
+    // Get the endpoint's interface friendly-name property.
+    hr = pProps->GetValue(PKEY_DeviceInterface_FriendlyName, &varIFName);
+    EXIT_ON_ERROR(hr)
+
+    // Print endpoint friendly name and endpoint ID.
+    //printf("Endpoint %d: \"%S\" (%S)\n", i, varName.pwszVal, pwszID);
+    printf("Endpoint %d: %s\n", i, wstr_to_utf8(varName.pwszVal));
+    printf("\t%s\n", wstr_to_utf8(varIFName.pwszVal));
+    printf("\t%s\n", wstr_to_utf8(varDesc.pwszVal));
+
+    CoTaskMemFree(pwszID);
+    pwszID = NULL;
+    PropVariantClear(&varName);
+    SAFE_RELEASE(pProps)
+    SAFE_RELEASE(pEndpoint)
+  }
+
+  SAFE_RELEASE(pEnumerator)
+  SAFE_RELEASE(pCollection)
+  return;
+
+Exit:
+  printf("Error!\n");
+  CoTaskMemFree(pwszID);
+  SAFE_RELEASE(pEnumerator)
+  SAFE_RELEASE(pCollection)
+  SAFE_RELEASE(pEndpoint)
+  SAFE_RELEASE(pProps)
+}
+// ============================================================================
+
 int
 wasapi_get_preferred_channel_layout(cubeb * context, cubeb_channel_layout * layout)
 {
@@ -1370,7 +1494,7 @@ wasapi_get_preferred_channel_layout(cubeb * context, cubeb_channel_layout * layo
   *layout = mask_to_channel_layout(format_pcm->dwChannelMask);
 
   LOG("Preferred channel layout: %s", CUBEB_CHANNEL_LAYOUT_MAPS[*layout].name);
-
+  PrintEndpointNames();
   return CUBEB_OK;
 }
 
