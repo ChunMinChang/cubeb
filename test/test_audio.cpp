@@ -94,6 +94,87 @@ int supports_channel_count(string backend_id, int nchannels)
     (backend_id != "opensl" && backend_id != "audiotrack");
 }
 
+static void
+print_device_info(cubeb_device_info * info)
+{
+  char devfmts[64] = "";
+  const char * devtype, * devstate, * devdeffmt;
+
+  switch (info->type) {
+    case CUBEB_DEVICE_TYPE_INPUT:
+      devtype = "input";
+      break;
+    case CUBEB_DEVICE_TYPE_OUTPUT:
+      devtype = "output";
+      break;
+    case CUBEB_DEVICE_TYPE_UNKNOWN:
+    default:
+      devtype = "unknown?";
+      break;
+  };
+
+  switch (info->state) {
+    case CUBEB_DEVICE_STATE_DISABLED:
+      devstate = "disabled";
+      break;
+    case CUBEB_DEVICE_STATE_UNPLUGGED:
+      devstate = "unplugged";
+      break;
+    case CUBEB_DEVICE_STATE_ENABLED:
+      devstate = "enabled";
+      break;
+    default:
+      devstate = "unknown?";
+      break;
+  };
+
+  switch (info->default_format) {
+    case CUBEB_DEVICE_FMT_S16LE:
+      devdeffmt = "S16LE";
+      break;
+    case CUBEB_DEVICE_FMT_S16BE:
+      devdeffmt = "S16BE";
+      break;
+    case CUBEB_DEVICE_FMT_F32LE:
+      devdeffmt = "F32LE";
+      break;
+    case CUBEB_DEVICE_FMT_F32BE:
+      devdeffmt = "F32BE";
+      break;
+    default:
+      devdeffmt = "unknown?";
+      break;
+  };
+
+  if (info->format & CUBEB_DEVICE_FMT_S16LE)
+    strcat(devfmts, " S16LE");
+  if (info->format & CUBEB_DEVICE_FMT_S16BE)
+    strcat(devfmts, " S16BE");
+  if (info->format & CUBEB_DEVICE_FMT_F32LE)
+    strcat(devfmts, " F32LE");
+  if (info->format & CUBEB_DEVICE_FMT_F32BE)
+    strcat(devfmts, " F32BE");
+
+  fprintf(stderr,
+      "dev: \"%s\"%s\n"
+      "\tName:    \"%s\"\n"
+      "\tGroup:   \"%s\"\n"
+      "\tVendor:  \"%s\"\n"
+      "\tType:    %s\n"
+      "\tState:   %s\n"
+      "\tCh:      %u\n"
+      "\tFormat:  %s (0x%x) (default: %s)\n"
+      "\tRate:    %u - %u (default: %u)\n"
+      "\tLatency: lo %u frames, hi %u frames\n",
+      info->device_id, info->preferred ? " (PREFERRED)" : "",
+      info->friendly_name, info->group_id, info->vendor_name,
+      devtype, devstate, info->max_channels,
+      (devfmts[0] == '\0') ? devfmts : devfmts + 1,
+      (unsigned int)info->format, devdeffmt,
+      info->min_rate, info->max_rate, info->default_rate,
+      info->latency_lo, info->latency_hi);
+}
+
 int run_test(int num_channels, layout_info layout, int sampling_rate, int is_float)
 {
   int r = CUBEB_OK;
@@ -118,6 +199,9 @@ int run_test(int num_channels, layout_info layout, int sampling_rate, int is_flo
 
   fprintf(stderr, "Testing %d channel(s), layout: %s, %d Hz, %s (%s)\n", num_channels, layout.name, sampling_rate, is_float ? "float" : "short", cubeb_get_backend_id(ctx));
 
+  cubeb_device_collection collection;
+  r = cubeb_enumerate_devices(ctx, CUBEB_DEVICE_TYPE_OUTPUT, &collection);
+
   cubeb_stream_params params;
   params.format = is_float ? CUBEB_SAMPLE_FLOAT32NE : CUBEB_SAMPLE_S16NE;
   params.rate = sampling_rate;
@@ -126,20 +210,26 @@ int run_test(int num_channels, layout_info layout, int sampling_rate, int is_flo
 
   synth_state synth(params.channels, params.rate);
 
-  cubeb_stream *stream = NULL;
-  r = cubeb_stream_init(ctx, &stream, "test tone", NULL, NULL, NULL, &params,
-      4096, is_float ? &data_cb<float> : &data_cb<short>, state_cb_audio, &synth);
-  if (r != CUBEB_OK) {
-    fprintf(stderr, "Error initializing cubeb stream: %d\n", r);
-    return r;
+  for (int i = 0; i < collection.count; ++i) {
+    // print_device_info(&collection.device[i]);
+
+    cubeb_stream *stream = NULL;
+    r = cubeb_stream_init(ctx, &stream, "test tone", NULL, NULL, collection.device[i].devid, &params,
+        4096, is_float ? &data_cb<float> : &data_cb<short>, state_cb_audio, &synth);
+    if (r != CUBEB_OK) {
+      fprintf(stderr, "Error initializing cubeb stream: %d\n", r);
+      return r;
+    }
+
+    std::unique_ptr<cubeb_stream, decltype(&cubeb_stream_destroy)>
+      cleanup_stream_at_exit(stream, cubeb_stream_destroy);
+
+    cubeb_stream_start(stream);
+    delay(200);
+    cubeb_stream_stop(stream);
   }
 
-  std::unique_ptr<cubeb_stream, decltype(&cubeb_stream_destroy)>
-    cleanup_stream_at_exit(stream, cubeb_stream_destroy);
-
-  cubeb_stream_start(stream);
-  delay(200);
-  cubeb_stream_stop(stream);
+  cubeb_device_collection_destroy(ctx, &collection);
 
   return r;
 }
@@ -213,15 +303,15 @@ int run_panning_volume_test(int is_float)
   return r;
 }
 
-TEST(cubeb, run_panning_volume_test_short)
-{
-  ASSERT_EQ(run_panning_volume_test(0), CUBEB_OK);
-}
+// TEST(cubeb, run_panning_volume_test_short)
+// {
+//   ASSERT_EQ(run_panning_volume_test(0), CUBEB_OK);
+// }
 
-TEST(cubeb, run_panning_volume_test_float)
-{
-  ASSERT_EQ(run_panning_volume_test(1), CUBEB_OK);
-}
+// TEST(cubeb, run_panning_volume_test_float)
+// {
+//   ASSERT_EQ(run_panning_volume_test(1), CUBEB_OK);
+// }
 
 TEST(cubeb, run_channel_rate_test)
 {
