@@ -316,6 +316,7 @@ typedef struct {
   char const * friendly_name; /**< Friendly device name which might be presented in a UI. */
   char const * group_id;      /**< Two devices have the same group identifier if they belong to the same physical device; for example a headset and microphone. */
   char const * vendor_name;   /**< Optional vendor name, may be NULL. */
+  char const * model;         /**< The unique identifier for the model of an AudioDevice. */
 
   cubeb_device_type type;     /**< Type of device (Input/Output). */
   cubeb_device_state state;   /**< State of device disabled/enabled/unplugged. */

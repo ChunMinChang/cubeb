@@ -3076,6 +3076,13 @@ audiounit_create_device_from_hwdev(cubeb_device_info * ret, AudioObjectID devid,
   }
 
   size = sizeof(CFStringRef);
+  adr.mSelector = kAudioDevicePropertyModelUID;
+  if (AudioObjectGetPropertyData(devid, &adr, 0, NULL, &size, &str) == noErr && str != NULL) {
+    ret->model = audiounit_strref_to_cstr_utf8(str);
+    CFRelease(str);
+  }
+
+  size = sizeof(CFStringRef);
   adr.mSelector = kAudioObjectPropertyName;
   if (AudioObjectGetPropertyData(devid, &adr, 0, NULL, &size, &str) == noErr && str != NULL) {
     UInt32 ds;

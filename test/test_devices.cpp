@@ -81,6 +81,7 @@ print_device_info(cubeb_device_info * info, FILE * f)
       "\tName:    \"%s\"\n"
       "\tGroup:   \"%s\"\n"
       "\tVendor:  \"%s\"\n"
+      "\tModel:   \"%s\"\n"
       "\tType:    %s\n"
       "\tState:   %s\n"
       "\tCh:      %u\n"
@@ -88,7 +89,7 @@ print_device_info(cubeb_device_info * info, FILE * f)
       "\tRate:    %u - %u (default: %u)\n"
       "\tLatency: lo %u frames, hi %u frames\n",
       info->device_id, info->preferred ? " (PREFERRED)" : "",
-      info->friendly_name, info->group_id, info->vendor_name,
+      info->friendly_name, info->group_id, info->vendor_name, info->model,
       devtype, devstate, info->max_channels,
       (devfmts[0] == '\0') ? devfmts : devfmts + 1,
       (unsigned int)info->format, devdeffmt,
