@@ -76,12 +76,30 @@ print_device_info(cubeb_device_info * info, FILE * f)
   if (info->format & CUBEB_DEVICE_FMT_F32BE)
     strcat(devfmts, " F32BE");
 
+  const char* transports[] = {
+    "Unknown",      // CUBEB_DEVICE_TRANS_UNKNOWN
+    "Aggregate",    // CUBEB_DEVICE_TRANS_AGGREGATE
+    "AirPlay",      // CUBEB_DEVICE_TRANS_AIRPLAY,
+    "AVB",          // CUBEB_DEVICE_TRANS_AVB,
+    "Bluetooth",    // CUBEB_DEVICE_TRANS_BLUETOOTH,
+    "BluetoothLE",  // CUBEB_DEVICE_TRANS_BLUETOOTHLE,
+    "BuiltIn",      // CUBEB_DEVICE_TRANS_BUILTIN,
+    "DisplayPort",  // CUBEB_DEVICE_TRANS_DISPLAYPORT,
+    "FireWire",     // CUBEB_DEVICE_TRANS_FIREWIRE,
+    "HDMI",         // CUBEB_DEVICE_TRANS_HDMI,
+    "PCI",          // CUBEB_DEVICE_TRANS_PCI,
+    "Thunderbolt",  // CUBEB_DEVICE_TRANS_THUNDERBOLT,
+    "USB",          // CUBEB_DEVICE_TRANS_USB,
+    "Virtual"       // CUBEB_DEVICE_TRANS_VIRTUAL,
+  };
+
   fprintf(f,
       "dev: \"%s\"%s\n"
       "\tName:    \"%s\"\n"
       "\tGroup:   \"%s\"\n"
       "\tVendor:  \"%s\"\n"
       "\tModel:   \"%s\"\n"
+      "\tTrans:   %s\n"
       "\tType:    %s\n"
       "\tState:   %s\n"
       "\tCh:      %u\n"
@@ -90,7 +108,7 @@ print_device_info(cubeb_device_info * info, FILE * f)
       "\tLatency: lo %u frames, hi %u frames\n",
       info->device_id, info->preferred ? " (PREFERRED)" : "",
       info->friendly_name, info->group_id, info->vendor_name, info->model,
-      devtype, devstate, info->max_channels,
+      transports[info->transport], devtype, devstate, info->max_channels,
       (devfmts[0] == '\0') ? devfmts : devfmts + 1,
       (unsigned int)info->format, devdeffmt,
       info->min_rate, info->max_rate, info->default_rate,
