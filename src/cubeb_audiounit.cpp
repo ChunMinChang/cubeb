@@ -1870,7 +1870,7 @@ audiounit_destroy_aggregate_device(AudioObjectID plugin_id, AudioDeviceID * aggr
   return CUBEB_OK;
 }
 
-static int
+static bool
 audiounit_new_unit_instance(AudioUnit * unit, device_info * device)
 {
   AudioComponentDescription desc;
@@ -1898,15 +1898,15 @@ audiounit_new_unit_instance(AudioUnit * unit, device_info * device)
   comp = AudioComponentFindNext(NULL, &desc);
   if (comp == NULL) {
     LOG("Could not find matching audio hardware.");
-    return CUBEB_ERROR;
+    return false;
   }
 
   rv = AudioComponentInstanceNew(comp, unit);
   if (rv != noErr) {
     LOG("AudioComponentInstanceNew rv=%d", rv);
-    return CUBEB_ERROR;
+    return false;
   }
-  return CUBEB_OK;
+  return true;
 }
 
 enum enable_state {
@@ -1940,9 +1940,8 @@ audiounit_create_unit(AudioUnit * unit, device_info * device)
   OSStatus rv;
   int r;
 
-  r = audiounit_new_unit_instance(unit, device);
-  if (r != CUBEB_OK) {
-    return r;
+  if (!audiounit_new_unit_instance(unit, device)) {
+    return CUBEB_ERROR;
   }
   assert(*unit);
 
