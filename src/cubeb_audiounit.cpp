@@ -1914,7 +1914,7 @@ enum enable_state {
   ENABLE,
 };
 
-static int
+static bool
 audiounit_enable_unit_scope(AudioUnit * unit, io_side side, enable_state state)
 {
   OSStatus rv;
@@ -1926,9 +1926,11 @@ audiounit_enable_unit_scope(AudioUnit * unit, io_side side, enable_state state)
                             sizeof(UInt32));
   if (rv != noErr) {
     LOG("AudioUnitSetProperty/kAudioOutputUnitProperty_EnableIO rv=%d", rv);
-    return CUBEB_ERROR;
+    LOG("Failed to %s audiounit %s scope ", (state == DISABLE ? "disable" : "enable"),
+        (side == INPUT ? "input" : "output"));
+    return false;
   }
-  return CUBEB_OK;
+  return true;
 }
 
 static int
@@ -1938,7 +1940,6 @@ audiounit_create_unit(AudioUnit * unit, device_info * device)
   assert(device);
 
   OSStatus rv;
-  int r;
 
   if (!audiounit_new_unit_instance(unit, device)) {
     return CUBEB_ERROR;
@@ -1952,26 +1953,14 @@ audiounit_create_unit(AudioUnit * unit, device_info * device)
 
 
   if (device->flags & DEV_INPUT) {
-    r = audiounit_enable_unit_scope(unit, INPUT, ENABLE);
-    if (r != CUBEB_OK) {
-      LOG("Failed to enable audiounit input scope ");
-      return r;
-    }
-    r = audiounit_enable_unit_scope(unit, OUTPUT, DISABLE);
-    if (r != CUBEB_OK) {
-      LOG("Failed to disable audiounit output scope ");
-      return r;
+    if (!audiounit_enable_unit_scope(unit, INPUT, ENABLE) ||
+        !audiounit_enable_unit_scope(unit, OUTPUT, DISABLE)) {
+      return CUBEB_ERROR;
     }
   } else if (device->flags & DEV_OUTPUT) {
-    r = audiounit_enable_unit_scope(unit, OUTPUT, ENABLE);
-    if (r != CUBEB_OK) {
-      LOG("Failed to enable audiounit output scope ");
-      return r;
-    }
-    r = audiounit_enable_unit_scope(unit, INPUT, DISABLE);
-    if (r != CUBEB_OK) {
-      LOG("Failed to disable audiounit input scope ");
-      return r;
+    if (!audiounit_enable_unit_scope(unit, OUTPUT, ENABLE) ||
+        !audiounit_enable_unit_scope(unit, INPUT, DISABLE)) {
+      return CUBEB_ERROR;
     }
   } else {
     assert(false);
