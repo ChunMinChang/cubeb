@@ -1308,7 +1308,7 @@ audiounit_get_current_channel_layout(AudioUnit output_unit)
   return audiounit_convert_channel_layout(layout.get());
 }
 
-static int audiounit_create_unit(AudioUnit * unit, device_info * device);
+static bool audiounit_create_unit(AudioUnit * unit, device_info * device);
 
 static OSStatus audiounit_remove_device_listener(cubeb * context);
 
@@ -1933,7 +1933,7 @@ audiounit_enable_unit_scope(AudioUnit * unit, io_side side, enable_state state)
   return true;
 }
 
-static int
+static bool
 audiounit_create_unit(AudioUnit * unit, device_info * device)
 {
   assert(*unit == nullptr);
@@ -1942,25 +1942,25 @@ audiounit_create_unit(AudioUnit * unit, device_info * device)
   OSStatus rv;
 
   if (!audiounit_new_unit_instance(unit, device)) {
-    return CUBEB_ERROR;
+    return false;
   }
   assert(*unit);
 
   if ((device->flags & DEV_SYSTEM_DEFAULT)
       && (device->flags & DEV_OUTPUT)) {
-    return CUBEB_OK;
+    return true;
   }
 
 
   if (device->flags & DEV_INPUT) {
     if (!audiounit_enable_unit_scope(unit, INPUT, ENABLE) ||
         !audiounit_enable_unit_scope(unit, OUTPUT, DISABLE)) {
-      return CUBEB_ERROR;
+      return false;
     }
   } else if (device->flags & DEV_OUTPUT) {
     if (!audiounit_enable_unit_scope(unit, OUTPUT, ENABLE) ||
         !audiounit_enable_unit_scope(unit, INPUT, DISABLE)) {
-      return CUBEB_ERROR;
+      return false;
     }
   } else {
     assert(false);
@@ -1973,10 +1973,10 @@ audiounit_create_unit(AudioUnit * unit, device_info * device)
                             &device->id, sizeof(AudioDeviceID));
   if (rv != noErr) {
     LOG("AudioUnitSetProperty/kAudioOutputUnitProperty_CurrentDevice rv=%d", rv);
-    return CUBEB_ERROR;
+    return false;
   }
 
-  return CUBEB_OK;
+  return true;
 }
 
 static int
@@ -2439,20 +2439,16 @@ audiounit_setup_stream(cubeb_stream * stm)
     }
   }
 
-  if (has_input(stm)) {
-    r = audiounit_create_unit(&stm->input_unit, &in_dev_info);
-    if (r != CUBEB_OK) {
-      LOG("(%p) AudioUnit creation for input failed.", stm);
-      return r;
-    }
+  if (has_input(stm) &&
+      !audiounit_create_unit(&stm->input_unit, &in_dev_info)) {
+    LOG("(%p) AudioUnit creation for input failed.", stm);
+    return CUBEB_ERROR;
   }
 
-  if (has_output(stm)) {
-    r = audiounit_create_unit(&stm->output_unit, &out_dev_info);
-    if (r != CUBEB_OK) {
-      LOG("(%p) AudioUnit creation for output failed.", stm);
-      return r;
-    }
+  if (has_output(stm) &&
+      !audiounit_create_unit(&stm->output_unit, &out_dev_info)) {
+    LOG("(%p) AudioUnit creation for output failed.", stm);
+    return CUBEB_ERROR;
   }
 
   /* Latency cannot change if another stream is operating in parallel. In this case
