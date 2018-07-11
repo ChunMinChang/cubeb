@@ -676,7 +676,7 @@ static int audiounit_stream_set_volume(cubeb_stream * stm, float volume);
 static int audiounit_uninstall_device_changed_callback(cubeb_stream * stm);
 static AudioObjectID audiounit_get_default_device_id(cubeb_device_type type);
 
-static int
+static bool
 audiounit_set_device_info(cubeb_stream * stm, AudioDeviceID id, io_side side)
 {
   assert(stm);
@@ -702,7 +702,9 @@ audiounit_set_device_info(cubeb_stream * stm, AudioDeviceID id, io_side side)
 
   AudioDeviceID default_device_id = audiounit_get_default_device_id(type);
   if (default_device_id == kAudioObjectUnknown) {
-    return CUBEB_ERROR;
+    LOG("(%p) Fail to set device info for %s since default device is unknown.",
+        stm, (side == INPUT ? "input" : "output"));
+    return false;
   }
   if (id == kAudioObjectUnknown) {
     info->id = default_device_id;
@@ -717,7 +719,7 @@ audiounit_set_device_info(cubeb_stream * stm, AudioDeviceID id, io_side side)
   assert(info->flags & DEV_INPUT && !(info->flags & DEV_OUTPUT) ||
            !(info->flags & DEV_INPUT) && info->flags & DEV_OUTPUT);
 
-  return CUBEB_OK;
+  return true;
 }
 
 
@@ -749,18 +751,15 @@ audiounit_reinit_stream(cubeb_stream * stm, device_flags_value flags)
     /* Reinit occurs in 2 cases. When the device is not alive any more and when the
      * default system device change. In both cases cubeb switch on the new default
      * device. This is considered the most expected behavior for the user. */
-    if (flags & DEV_INPUT) {
-      r = audiounit_set_device_info(stm, 0, INPUT);
-      if (r != CUBEB_OK) {
-        LOG("(%p) Set input device info failed. This can happen when last media device is unplugged", stm);
-        return CUBEB_ERROR;
-      }
+    if ((flags & DEV_INPUT) &&
+        !audiounit_set_device_info(stm, 0, INPUT)) {
+      LOG("(%p) Set input device info failed. This can happen when last media device is unplugged", stm);
+      return CUBEB_ERROR;
     }
     /* Always use the default output on reinit. This is not correct in every case
      * but it is sufficient for Firefox and prevent reinit from reporting failures.
      * It will change soon when reinit mechanism will be updated. */
-    r = audiounit_set_device_info(stm, 0, OUTPUT);
-    if (r != CUBEB_OK) {
+    if (!audiounit_set_device_info(stm, 0, OUTPUT)) {
       LOG("(%p) Set output device info failed. This can happen when last media device is unplugged", stm);
       return CUBEB_ERROR;
     }
@@ -2643,18 +2642,18 @@ audiounit_stream_init(cubeb * context,
   }
   if (input_stream_params) {
     stm->input_stream_params = *input_stream_params;
-    r = audiounit_set_device_info(stm.get(), reinterpret_cast<uintptr_t>(input_device), INPUT);
-    if (r != CUBEB_OK) {
-      LOG("(%p) Fail to set device info for input.", stm.get());
-      return r;
+    if (!audiounit_set_device_info(stm.get(),
+                                   reinterpret_cast<uintptr_t>(input_device),
+                                   INPUT)) {
+      return CUBEB_ERROR;
     }
   }
   if (output_stream_params) {
     stm->output_stream_params = *output_stream_params;
-    r = audiounit_set_device_info(stm.get(), reinterpret_cast<uintptr_t>(output_device), OUTPUT);
-    if (r != CUBEB_OK) {
-      LOG("(%p) Fail to set device info for output.", stm.get());
-      return r;
+    if (!audiounit_set_device_info(stm.get(),
+                                   reinterpret_cast<uintptr_t>(output_device),
+                                   OUTPUT)) {
+      return CUBEB_ERROR;
     }
   }
 
