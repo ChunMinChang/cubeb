@@ -7,11 +7,17 @@ project(cubeb
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUILD_TESTS "Build tests" ON)
-option(BUILD_RUST_LIBS "Build rust backends" OFF)
+option(BUILD_RUST_LIBS "Build rust backends" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
       "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
+endif()
+
+if (BUILD_RUST_LIBS)
+  if(EXISTS "${PROJECT_SOURCE_DIR}/src/cubeb-coreaudio-rs")
+    set(USE_AUDIOUNIT_RUST 1)
+  endif()
 endif()
 
 if(POLICY CMP0063)
@@ -245,6 +251,25 @@ if(USE_PULSE_RUST)
   target_link_libraries(cubeb PRIVATE
     debug "${CMAKE_SOURCE_DIR}/src/cubeb-pulse-rs/target/debug/libcubeb_pulse.a"
     optimized "${CMAKE_SOURCE_DIR}/src/cubeb-pulse-rs/target/release/libcubeb_pulse.a")
+endif()
+
+if(USE_AUDIOUNIT_RUST)
+  include(ExternalProject)
+  set_directory_properties(PROPERTIES EP_PREFIX ${CMAKE_BINARY_DIR}/rust)
+  ExternalProject_Add(
+    cubeb_coreaudio_rs
+    DOWNLOAD_COMMAND ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND cargo build
+    COMMAND cargo build --release
+    BINARY_DIR "${CMAKE_SOURCE_DIR}/src/cubeb-coreaudio-rs"
+    INSTALL_COMMAND ""
+    LOG_BUILD ON)
+  add_dependencies(cubeb cubeb_coreaudio_rs)
+  target_compile_definitions(cubeb PRIVATE USE_AUDIOUNIT_RUST)
+  target_link_libraries(cubeb PRIVATE
+    debug "${CMAKE_SOURCE_DIR}/src/cubeb-coreaudio-rs/target/debug/libcubeb_coreaudio.a"
+    optimized "${CMAKE_SOURCE_DIR}/src/cubeb-coreaudio-rs/target/release/libcubeb_coreaudio.a")
 endif()
 
 find_package(Doxygen)

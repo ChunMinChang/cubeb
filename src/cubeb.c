@@ -39,6 +39,9 @@ int jack_init (cubeb ** context, char const * context_name);
 #if defined(USE_ALSA)
 int alsa_init(cubeb ** context, char const * context_name);
 #endif
+#if defined(USE_AUDIOUNIT_RUST)
+int audiounit_rust_init(cubeb ** contet, char const * context_name);
+#endif
 #if defined(USE_AUDIOUNIT)
 int audiounit_init(cubeb ** context, char const * context_name);
 #endif
@@ -182,6 +185,9 @@ cubeb_init(cubeb ** context, char const * context_name, char const * backend_nam
 #endif
 #if defined(USE_ALSA)
     alsa_init,
+#endif
+#if defined(USE_AUDIOUNIT_RUST)
+    audiounit_rust_init,
 #endif
 #if defined(USE_AUDIOUNIT)
     audiounit_init,
