@@ -253,3 +253,112 @@ TEST(cubeb, stream_get_current_device)
   r = cubeb_stream_device_destroy(stream, device);
   ASSERT_EQ(r, CUBEB_OK) << "Error destroying current devices";
 }
+
+void device_collection_changed_callback(cubeb * context, void * user)
+{
+  fprintf(stderr, "device collection changed callback\n");
+  ASSERT_TRUE(false) << "Error: device collection changed callback"
+                        " called when opening a stream";
+}
+
+TEST(cubeb, register_device_collection_change_for_unknown_type)
+{
+  cubeb *ctx;
+  int r = CUBEB_OK;
+
+  r = common_init(&ctx, "Cubeb duplex example with collection change");
+  ASSERT_EQ(r, CUBEB_OK) << "Error initializing cubeb library";
+
+  std::unique_ptr<cubeb, decltype(&cubeb_destroy)>
+    cleanup_cubeb_at_exit(ctx, cubeb_destroy);
+
+  r = cubeb_register_device_collection_changed(ctx,
+                                               static_cast<cubeb_device_type>(CUBEB_DEVICE_TYPE_UNKNOWN),
+                                               device_collection_changed_callback,
+                                               nullptr);
+  ASSERT_EQ(r, CUBEB_ERROR_INVALID_PARAMETER) << "Error returning wrong error type";
+}
+
+TEST(cubeb, device_collection_change)
+{
+  cubeb *ctx;
+  int r = CUBEB_OK;
+
+  r = common_init(&ctx, "Cubeb duplex example with collection change");
+  ASSERT_EQ(r, CUBEB_OK) << "Error initializing cubeb library";
+
+  std::unique_ptr<cubeb, decltype(&cubeb_destroy)>
+    cleanup_cubeb_at_exit(ctx, cubeb_destroy);
+
+  int scopes[3] = {
+    CUBEB_DEVICE_TYPE_INPUT,
+    CUBEB_DEVICE_TYPE_OUTPUT,
+    CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT
+  };
+
+  for (size_t i = 0 ; i < ARRAY_LENGTH(scopes) ; ++i) {
+    // Register a callback when device collection is changed.
+    r = cubeb_register_device_collection_changed(ctx,
+                                                static_cast<cubeb_device_type>(scopes[i]),
+                                                device_collection_changed_callback,
+                                                nullptr);
+    ASSERT_EQ(r, CUBEB_OK) << "Error registering device collection changed";
+
+    // Unregister all the callbacks regardless of the scope.
+    r = cubeb_register_device_collection_changed(ctx,
+                                                static_cast<cubeb_device_type>(CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT),
+                                                nullptr,
+                                                nullptr);
+    ASSERT_EQ(r, CUBEB_OK) << "Error unregistering device collection changed";
+
+    // Register a callback after unregistering the origin one.
+    r = cubeb_register_device_collection_changed(ctx,
+                                                static_cast<cubeb_device_type>(scopes[i]),
+                                                device_collection_changed_callback,
+                                                nullptr);
+    ASSERT_EQ(r, CUBEB_OK) << "Error registering device collection changed";
+
+    // Unregister the callback.
+    r = cubeb_register_device_collection_changed(ctx,
+                                                static_cast<cubeb_device_type>(scopes[i]),
+                                                nullptr,
+                                                nullptr);
+    ASSERT_EQ(r, CUBEB_OK) << "Error unregistering device collection changed";
+  }
+}
+
+TEST(cubeb, register_device_collection_changed_twice)
+{
+  cubeb *ctx;
+  int r = CUBEB_OK;
+
+  r = common_init(&ctx, "Cubeb duplex example with collection change");
+  ASSERT_EQ(r, CUBEB_OK) << "Error initializing cubeb library";
+
+  std::unique_ptr<cubeb, decltype(&cubeb_destroy)>
+    cleanup_cubeb_at_exit(ctx, cubeb_destroy);
+
+  int scopes[3] = {
+    CUBEB_DEVICE_TYPE_INPUT,
+    CUBEB_DEVICE_TYPE_OUTPUT,
+    CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT
+  };
+
+  for (size_t i = 0 ; i < ARRAY_LENGTH(scopes) ; ++i) {
+    // Register a callback when input device collection is changed.
+    r = cubeb_register_device_collection_changed(ctx,
+                                                static_cast<cubeb_device_type>(scopes[i]),
+                                                device_collection_changed_callback,
+                                                nullptr);
+    ASSERT_EQ(r, CUBEB_OK) << "Error registering device collection changed";
+
+    // Get an assertion fails when registering a callback without unregistering the origin callback.
+    ASSERT_DEATH(
+      cubeb_register_device_collection_changed(ctx,
+                                               static_cast<cubeb_device_type>(scopes[i]),
+                                               device_collection_changed_callback,
+                                               nullptr),
+      ""
+    );
+  }
+}
