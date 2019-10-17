@@ -7,7 +7,7 @@ project(cubeb
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUILD_TESTS "Build tests" ON)
-option(BUILD_RUST_LIBS "Build rust backends" OFF)
+option(BUILD_RUST_LIBS "Build rust backends" ON)
 option(BUILD_TOOLS "Build tools" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
