@@ -166,6 +166,7 @@ struct MixerContext {
   const float _surround_mix_level = C_30DB;              ///< surround mixing level
   const float _center_mix_level = C_30DB;                ///< center mixing level
   const float _lfe_mix_level = 1;                        ///< LFE mixing level
+  size_t _channel_index[CHANNELS_MAX];                         ///< channel order of the output buffer
   double _matrix[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};        ///< floating point rematrixing coefficients
   float _matrix_flt[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};     ///< single precision floating point rematrixing coefficients
   int32_t _matrix32[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};     ///< 17.15 fixed point rematrixing coefficients
@@ -395,6 +396,12 @@ int MixerContext::init()
     _matrix_ch[i][0] = ch_in;
   }
 
+  // Set the channel order of the output buffer.
+  // The index order is same as the mixing matrices.
+  for (size_t i = 0 ; i < CHANNELS_MAX ; ++i) {
+    _channel_index[i] = i;
+  }
+
   return 0;
 }
 
@@ -455,40 +462,41 @@ static int rematrix(const MixerContext * s, TYPE * aOut, const TYPE * aIn,
 
   for (uint32_t out_i = 0; out_i < s->_out_ch_count; out_i++) {
     TYPE* out = aOut + out_i;
-    switch (s->_matrix_ch[out_i][0]) {
+    size_t index = s->_channel_index[out_i];
+    switch (s->_matrix_ch[index][0]) {
       case 0:
         for (uint32_t i = 0; i < frames; i++) {
           out[i * s->_out_ch_count] = 0;
         }
         break;
       case 1: {
-        int in_i = s->_matrix_ch[out_i][1];
+        int in_i = s->_matrix_ch[index][1];
         copy(out,
              s->_out_ch_count,
              aIn + in_i,
              s->_in_ch_count,
-             matrix_coeff[out_i][in_i],
+             matrix_coeff[index][in_i],
              aF,
              frames);
       } break;
       case 2:
         sum2(out,
              s->_out_ch_count,
-             aIn + s->_matrix_ch[out_i][1],
-             aIn + s->_matrix_ch[out_i][2],
+             aIn + s->_matrix_ch[index][1],
+             aIn + s->_matrix_ch[index][2],
              s->_in_ch_count,
-             matrix_coeff[out_i][s->_matrix_ch[out_i][1]],
-             matrix_coeff[out_i][s->_matrix_ch[out_i][2]],
+             matrix_coeff[index][s->_matrix_ch[index][1]],
+             matrix_coeff[index][s->_matrix_ch[index][2]],
              aF,
              frames);
         break;
       default:
         for (uint32_t i = 0; i < frames; i++) {
           TYPE_COEFF v = 0;
-          for (uint32_t j = 0; j < s->_matrix_ch[out_i][0]; j++) {
-            uint32_t in_i = s->_matrix_ch[out_i][1 + j];
+          for (uint32_t j = 0; j < s->_matrix_ch[index][0]; j++) {
+            uint32_t in_i = s->_matrix_ch[index][1 + j];
             v +=
-              *(aIn + in_i + i * s->_in_ch_count) * matrix_coeff[out_i][in_i];
+              *(aIn + in_i + i * s->_in_ch_count) * matrix_coeff[index][in_i];
           }
           out[i * s->_out_ch_count] = aF(v);
         }
