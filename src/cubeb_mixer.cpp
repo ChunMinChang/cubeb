@@ -25,6 +25,7 @@
 #endif
 
 #define CHANNELS_MAX 32
+#define SKIP                   static_cast<size_t>(-1)
 #define FRONT_LEFT             0
 #define FRONT_RIGHT            1
 #define FRONT_CENTER           2
@@ -91,15 +92,17 @@ struct MixerContext {
                uint32_t in_channels,
                cubeb_channel_layout in,
                uint32_t out_channels,
-               cubeb_channel_layout out)
+               cubeb_channel_layout out,
+               const cubeb_channel * output_channel_order)
     : _format(f)
     , _in_ch_layout(cubeb_channel_layout_check(in, in_channels))
     , _out_ch_layout(cubeb_channel_layout_check(out, out_channels))
     , _in_ch_count(in_channels)
     , _out_ch_count(out_channels)
+    , _output_channel_order(output_channel_order)
   {
     if (in_channels != cubeb_channel_layout_nb_channels(in) ||
-        out_channels != cubeb_channel_layout_nb_channels(out)) {
+       (!output_channel_order && out_channels != cubeb_channel_layout_nb_channels(out))) {
       // Mismatch between channels and layout, aborting.
       return;
     }
@@ -155,6 +158,7 @@ struct MixerContext {
     return true;
   }
 
+  void set_channel_order();
   int auto_matrix();
   int init();
 
@@ -166,7 +170,8 @@ struct MixerContext {
   const float _surround_mix_level = C_30DB;              ///< surround mixing level
   const float _center_mix_level = C_30DB;                ///< center mixing level
   const float _lfe_mix_level = 1;                        ///< LFE mixing level
-  size_t _channel_index[CHANNELS_MAX];                         ///< channel order of the output buffer
+  const cubeb_channel * _output_channel_order ;                ///< channel order of the output buffer
+  size_t _channel_index[CHANNELS_MAX];                         ///< matrix index for the channels of the output buffer
   double _matrix[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};        ///< floating point rematrixing coefficients
   float _matrix_flt[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};     ///< single precision floating point rematrixing coefficients
   int32_t _matrix32[CHANNELS_MAX][CHANNELS_MAX] = {{ 0 }};     ///< 17.15 fixed point rematrixing coefficients
@@ -175,6 +180,45 @@ struct MixerContext {
   bool _valid = false;                             ///< Set to true if context is valid.
 };
 
+void MixerContext::set_channel_order()
+{
+  if (_output_channel_order) {
+    for (size_t i = 0 ; i < CHANNELS_MAX ; ++i) {
+      if (i < _out_ch_count) {
+        switch (_output_channel_order[i]) {
+          case CHANNEL_FRONT_LEFT: _channel_index[i] = FRONT_LEFT; break;
+          case CHANNEL_FRONT_RIGHT: _channel_index[i] = FRONT_RIGHT; break;
+          case CHANNEL_FRONT_CENTER: _channel_index[i] = FRONT_CENTER; break;
+          case CHANNEL_LOW_FREQUENCY: _channel_index[i] = LOW_FREQUENCY; break;
+          case CHANNEL_BACK_LEFT: _channel_index[i] = BACK_LEFT; break;
+          case CHANNEL_BACK_RIGHT: _channel_index[i] = BACK_RIGHT; break;
+          case CHANNEL_FRONT_LEFT_OF_CENTER: _channel_index[i] = FRONT_LEFT_OF_CENTER; break;
+          case CHANNEL_FRONT_RIGHT_OF_CENTER: _channel_index[i] = FRONT_RIGHT_OF_CENTER; break;
+          case CHANNEL_BACK_CENTER: _channel_index[i] = BACK_CENTER; break;
+          case CHANNEL_SIDE_LEFT: _channel_index[i] = SIDE_LEFT; break;
+          case CHANNEL_SIDE_RIGHT: _channel_index[i] = SIDE_RIGHT; break;
+          case CHANNEL_TOP_CENTER: _channel_index[i] = TOP_CENTER; break;
+          case CHANNEL_TOP_FRONT_LEFT: _channel_index[i] = TOP_FRONT_LEFT; break;
+          case CHANNEL_TOP_FRONT_CENTER: _channel_index[i] = TOP_FRONT_CENTER; break;
+          case CHANNEL_TOP_FRONT_RIGHT: _channel_index[i] = TOP_FRONT_RIGHT; break;
+          case CHANNEL_TOP_BACK_LEFT: _channel_index[i] = TOP_BACK_LEFT; break;
+          case CHANNEL_TOP_BACK_CENTER: _channel_index[i] = TOP_BACK_CENTER; break;
+          case CHANNEL_TOP_BACK_RIGHT: _channel_index[i] = TOP_BACK_RIGHT; break;
+          default: _channel_index[i] = SKIP; break;
+        }
+      } else {
+        _channel_index[i] = SKIP;
+      }
+    }
+  } else {
+    // Set the channel order of the output buffer.
+    // The index order is same as the mixing matrices.
+    for (size_t i = 0 ; i < CHANNELS_MAX ; ++i) {
+      _channel_index[i] = i;
+    }
+  }
+}
+
 int MixerContext::auto_matrix()
 {
   double matrix[NUM_NAMED_CHANNELS][NUM_NAMED_CHANNELS] = { { 0 } };
@@ -182,7 +226,14 @@ int MixerContext::auto_matrix()
   float maxval;
 
   cubeb_channel_layout in_ch_layout = clean_layout(_in_ch_layout);
-  cubeb_channel_layout out_ch_layout = clean_layout(_out_ch_layout);
+  cubeb_channel_layout out_ch_layout = CUBEB_LAYOUT_UNDEFINED;
+  if (_output_channel_order) {
+    for (uint32_t i = 0 ; i < _out_ch_count ; ++i) {
+      out_ch_layout |= _output_channel_order[i];
+    }
+  } else {
+    out_ch_layout = clean_layout(_out_ch_layout);
+  }
 
   if (!sane_layout(in_ch_layout)) {
     // Channel Not Supported
@@ -396,11 +447,7 @@ int MixerContext::init()
     _matrix_ch[i][0] = ch_in;
   }
 
-  // Set the channel order of the output buffer.
-  // The index order is same as the mixing matrices.
-  for (size_t i = 0 ; i < CHANNELS_MAX ; ++i) {
-    _channel_index[i] = i;
-  }
+  set_channel_order();
 
   return 0;
 }
@@ -463,7 +510,8 @@ static int rematrix(const MixerContext * s, TYPE * aOut, const TYPE * aIn,
   for (uint32_t out_i = 0; out_i < s->_out_ch_count; out_i++) {
     TYPE* out = aOut + out_i;
     size_t index = s->_channel_index[out_i];
-    switch (s->_matrix_ch[index][0]) {
+    uint8_t mixing_channels = index == SKIP ? 0 : s->_matrix_ch[index][0];
+    switch (mixing_channels) {
       case 0:
         for (uint32_t i = 0; i < frames; i++) {
           out[i * s->_out_ch_count] = 0;
@@ -493,7 +541,7 @@ static int rematrix(const MixerContext * s, TYPE * aOut, const TYPE * aIn,
       default:
         for (uint32_t i = 0; i < frames; i++) {
           TYPE_COEFF v = 0;
-          for (uint32_t j = 0; j < s->_matrix_ch[index][0]; j++) {
+          for (uint32_t j = 0; j < mixing_channels; j++) {
             uint32_t in_i = s->_matrix_ch[index][1 + j];
             v +=
               *(aIn + in_i + i * s->_in_ch_count) * matrix_coeff[index][in_i];
@@ -512,8 +560,9 @@ struct cubeb_mixer
               uint32_t in_channels,
               cubeb_channel_layout in_layout,
               uint32_t out_channels,
-              cubeb_channel_layout out_layout)
-    : _context(format, in_channels, in_layout, out_channels, out_layout)
+              cubeb_channel_layout out_layout,
+              const cubeb_channel * output_channel_order)
+    : _context(format, in_channels, in_layout, out_channels, out_layout, output_channel_order)
   {
   }
 
@@ -648,10 +697,11 @@ cubeb_mixer* cubeb_mixer_create(cubeb_sample_format format,
                                 uint32_t in_channels,
                                 cubeb_channel_layout in_layout,
                                 uint32_t out_channels,
-                                cubeb_channel_layout out_layout)
+                                cubeb_channel_layout out_layout,
+                                const cubeb_channel * output_channel_order)
 {
   return new cubeb_mixer(
-    format, in_channels, in_layout, out_channels, out_layout);
+    format, in_channels, in_layout, out_channels, out_layout, output_channel_order);
 }
 
 void cubeb_mixer_destroy(cubeb_mixer * mixer)

@@ -1495,7 +1495,8 @@ audiounit_init_mixer(cubeb_stream * stm)
                                       stm->output_stream_params.channels,
                                       stm->output_stream_params.layout,
                                       stm->context->channels,
-                                      stm->context->layout));
+                                      stm->context->layout,
+                                      nullptr));
   assert(stm->mixer);
 }
 

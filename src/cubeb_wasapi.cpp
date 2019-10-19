@@ -2197,7 +2197,8 @@ int setup_wasapi_stream(cubeb_stream * stm)
                                               stm->input_mix_params.channels,
                                               stm->input_mix_params.layout,
                                               stm->input_stream_params.channels,
-                                              stm->input_stream_params.layout));
+                                              stm->input_stream_params.layout,
+                                              nullptr));
     assert(stm->input_mixer);
   }
 
@@ -2210,7 +2211,8 @@ int setup_wasapi_stream(cubeb_stream * stm)
                                                stm->output_stream_params.channels,
                                                stm->output_stream_params.layout,
                                                stm->output_mix_params.channels,
-                                               stm->output_mix_params.layout));
+                                               stm->output_mix_params.layout,
+                                               nullptr));
     assert(stm->output_mixer);
     // Input is up/down mixed when depacketized in get_input_buffer.
     stm->mix_buffer.resize(

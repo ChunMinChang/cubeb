@@ -125,7 +125,17 @@ int run_test(int num_channels, int sampling_rate, int is_float)
   params.format = is_float ? CUBEB_SAMPLE_FLOAT32NE : CUBEB_SAMPLE_S16NE;
   params.rate = sampling_rate;
   params.channels = num_channels;
-  params.layout = CUBEB_LAYOUT_UNDEFINED;
+  // params.layout = CUBEB_LAYOUT_UNDEFINED;
+  cubeb_channel_layout layouts[7] = {
+    CUBEB_LAYOUT_UNDEFINED,
+    CUBEB_LAYOUT_MONO,
+    CUBEB_LAYOUT_STEREO,
+    CUBEB_LAYOUT_3F,
+    CUBEB_LAYOUT_2F2,
+    CUBEB_LAYOUT_3F2,
+    CUBEB_LAYOUT_3F2_LFE
+  };
+  params.layout = layouts[num_channels];
   params.prefs = CUBEB_STREAM_PREF_NONE;
 
   synth_state synth(params.channels, params.rate);
@@ -206,15 +216,15 @@ int run_volume_test(int is_float)
   return r;
 }
 
-TEST(cubeb, run_volume_test_short)
-{
-  ASSERT_EQ(run_volume_test(0), CUBEB_OK);
-}
+// TEST(cubeb, run_volume_test_short)
+// {
+//   ASSERT_EQ(run_volume_test(0), CUBEB_OK);
+// }
 
-TEST(cubeb, run_volume_test_float)
-{
-  ASSERT_EQ(run_volume_test(1), CUBEB_OK);
-}
+// TEST(cubeb, run_volume_test_float)
+// {
+//   ASSERT_EQ(run_volume_test(1), CUBEB_OK);
+// }
 
 TEST(cubeb, run_channel_rate_test)
 {
