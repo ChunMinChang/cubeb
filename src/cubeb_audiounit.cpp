@@ -30,6 +30,7 @@
 #include "cubeb_ring_array.h"
 #include <algorithm>
 #include <atomic>
+#include <utility>
 #include <vector>
 #include <set>
 #include <sys/time.h>
@@ -142,6 +143,7 @@ struct cubeb {
   dispatch_queue_t serial_queue = dispatch_queue_create(DISPATCH_QUEUE_LABEL, DISPATCH_QUEUE_SERIAL);
   // Current used channel layout
   atomic<cubeb_channel_layout> layout{ CUBEB_LAYOUT_UNDEFINED };
+  vector<cubeb_channel> channel_order;
   uint32_t channels = 0;
 };
 
@@ -1313,16 +1315,15 @@ audiounit_get_preferred_sample_rate(cubeb * /* ctx */, uint32_t * rate)
   return CUBEB_OK;
 }
 
-static cubeb_channel_layout
+static pair<vector<cubeb_channel>, cubeb_channel_layout>
 audiounit_convert_channel_layout(AudioChannelLayout * layout)
 {
-  // When having one or two channel, force mono or stereo. Some devices (namely,
-  // Bose QC35, mark 1 and 2), expose a single channel mapped to the right for
-  // some reason.
+  vector<cubeb_channel> channels;
+  // When having one channel, force mono. Some devices (namely, Bose QC35,
+  // mark 1 and 2), expose a single channel mapped to the right for some reason.
   if (layout->mNumberChannelDescriptions == 1) {
-    return CUBEB_LAYOUT_MONO;
-  } else if (layout->mNumberChannelDescriptions == 2) {
-    return CUBEB_LAYOUT_STEREO;
+    channels.push_back(CHANNEL_FRONT_CENTER);
+    return make_pair(channels, CUBEB_LAYOUT_MONO);
   }
 
   if (layout->mChannelLayoutTag != kAudioChannelLayoutTag_UseChannelDescriptions) {
@@ -1330,24 +1331,26 @@ audiounit_convert_channel_layout(AudioChannelLayout * layout)
     // kAudioChannelLayoutTag_Mono
     // kAudioChannelLayoutTag_Stereo
     // ....
-    LOG("Only handle UseChannelDescriptions for now.\n");
-    return CUBEB_LAYOUT_UNDEFINED;
+    LOG("Only handle UseChannelDescriptions for now.");
+    return make_pair(channels, CUBEB_LAYOUT_UNDEFINED);
   }
 
+  LOG("Device has %d chanenls.", layout->mNumberChannelDescriptions);
   cubeb_channel_layout cl = 0;
   for (UInt32 i = 0; i < layout->mNumberChannelDescriptions; ++i) {
     cubeb_channel cc = channel_label_to_cubeb_channel(
       layout->mChannelDescriptions[i].mChannelLabel);
-    if (cc == CHANNEL_UNKNOWN) {
-      return CUBEB_LAYOUT_UNDEFINED;
+    LOG("channel %d: %x", i, cc);
+    channels.push_back(cc);
+    if (cc != CHANNEL_UNKNOWN) {
+      cl |= cc;
     }
-    cl |= cc;
   }
 
-  return cl;
+  return make_pair(channels, cl);
 }
 
-static cubeb_channel_layout
+static pair<vector<cubeb_channel>, cubeb_channel_layout>
 audiounit_get_preferred_channel_layout(AudioUnit output_unit)
 {
   OSStatus rv = noErr;
@@ -1360,7 +1363,7 @@ audiounit_get_preferred_channel_layout(AudioUnit output_unit)
                                 nullptr);
   if (rv != noErr) {
     LOG("AudioUnitGetPropertyInfo/kAudioDevicePropertyPreferredChannelLayout rv=%d", rv);
-    return CUBEB_LAYOUT_UNDEFINED;
+    return make_pair(vector<cubeb_channel>(), CUBEB_LAYOUT_UNDEFINED);
   }
   assert(size > 0);
 
@@ -1373,13 +1376,13 @@ audiounit_get_preferred_channel_layout(AudioUnit output_unit)
                             &size);
   if (rv != noErr) {
     LOG("AudioUnitGetProperty/kAudioDevicePropertyPreferredChannelLayout rv=%d", rv);
-    return CUBEB_LAYOUT_UNDEFINED;
+    return make_pair(vector<cubeb_channel>(), CUBEB_LAYOUT_UNDEFINED);
   }
 
   return audiounit_convert_channel_layout(layout.get());
 }
 
-static cubeb_channel_layout
+static pair<vector<cubeb_channel>, cubeb_channel_layout>
 audiounit_get_current_channel_layout(AudioUnit output_unit)
 {
   OSStatus rv = noErr;
@@ -1406,7 +1409,7 @@ audiounit_get_current_channel_layout(AudioUnit output_unit)
                             &size);
   if (rv != noErr) {
     LOG("AudioUnitGetProperty/kAudioUnitProperty_AudioChannelLayout rv=%d", rv);
-    return CUBEB_LAYOUT_UNDEFINED;
+    return make_pair(vector<cubeb_channel>(), CUBEB_LAYOUT_UNDEFINED);
   }
 
   return audiounit_convert_channel_layout(layout.get());
@@ -1496,74 +1499,10 @@ audiounit_init_mixer(cubeb_stream * stm)
                                       stm->output_stream_params.layout,
                                       stm->context->channels,
                                       stm->context->layout,
-                                      nullptr));
+                                      stm->context->channel_order.size() == stm->context->channels
+                                        ? stm->context->channel_order.data()
+                                        : nullptr));
   assert(stm->mixer);
-}
-
-static int
-audiounit_set_channel_layout(AudioUnit unit,
-                             io_side side,
-                             cubeb_channel_layout layout)
-{
-  if (side != io_side::OUTPUT) {
-    return CUBEB_ERROR;
-  }
-
-  if (layout == CUBEB_LAYOUT_UNDEFINED) {
-    // We leave everything as-is...
-    return CUBEB_OK;
-  }
-
-
-  OSStatus r;
-  uint32_t nb_channels = cubeb_channel_layout_nb_channels(layout);
-
-  // We do not use CoreAudio standard layout for lack of documentation on what
-  // the actual channel orders are. So we set a custom layout.
-  size_t size = offsetof(AudioChannelLayout, mChannelDescriptions[nb_channels]);
-  auto au_layout = make_sized_audio_channel_layout(size);
-  au_layout->mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
-  au_layout->mNumberChannelDescriptions = nb_channels;
-
-  uint32_t channels = 0;
-  cubeb_channel_layout channelMap = layout;
-  for (uint32_t i = 0; channelMap != 0; ++i) {
-    XASSERT(channels < nb_channels);
-    uint32_t channel = (channelMap & 1) << i;
-    if (channel != 0) {
-      au_layout->mChannelDescriptions[channels].mChannelLabel =
-        cubeb_channel_to_channel_label(static_cast<cubeb_channel>(channel));
-      au_layout->mChannelDescriptions[channels].mChannelFlags = kAudioChannelFlags_AllOff;
-      channels++;
-    }
-    channelMap = channelMap >> 1;
-  }
-
-  r = AudioUnitSetProperty(unit,
-                           kAudioUnitProperty_AudioChannelLayout,
-                           kAudioUnitScope_Input,
-                           AU_OUT_BUS,
-                           au_layout.get(),
-                           size);
-  if (r != noErr) {
-    LOG("AudioUnitSetProperty/%s/kAudioUnitProperty_AudioChannelLayout rv=%d", to_string(side), r);
-    return CUBEB_ERROR;
-  }
-
-  return CUBEB_OK;
-}
-
-void
-audiounit_layout_init(cubeb_stream * stm, io_side side)
-{
-  // We currently don't support the input layout setting.
-  if (side == io_side::INPUT) {
-    return;
-  }
-
-  stm->context->layout = audiounit_get_current_channel_layout(stm->output_unit);
-
-  audiounit_set_channel_layout(stm->output_unit, io_side::OUTPUT, stm->context->layout);
 }
 
 static vector<AudioObjectID>
@@ -2474,8 +2413,10 @@ audiounit_configure_output(cubeb_stream * stm)
   LOG("(%p) Output device sampling rate: %.2f", stm, output_hw_desc.mSampleRate);
   stm->context->channels = output_hw_desc.mChannelsPerFrame;
 
-  // Set the input layout to match the output device layout.
-  audiounit_layout_init(stm, io_side::OUTPUT);
+  pair<vector<cubeb_channel>, cubeb_channel_layout> layout_info = audiounit_get_current_channel_layout(stm->output_unit);
+  stm->context->channel_order = layout_info.first;
+  stm->context->layout = layout_info.second;
+
   if (stm->context->channels != stm->output_stream_params.channels ||
       stm->context->layout != stm->output_stream_params.layout) {
     LOG("Incompatible channel layouts detected, setting up remixer");
