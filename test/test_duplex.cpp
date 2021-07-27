@@ -17,6 +17,7 @@
 #include <memory>
 #include "cubeb/cubeb.h"
 #include <atomic>
+#include <thread>
 
 //#define ENABLE_NORMAL_LOG
 //#define ENABLE_VERBOSE_LOG
@@ -235,6 +236,7 @@ std::vector<cubeb_devid> get_devices(cubeb * ctx, cubeb_device_type type) {
 // Input only
 struct StreamInitInfo {
   bool used = false;
+  std::thread t;
   int init_result = CUBEB_ERROR;
   cubeb * ctx;
   cubeb_devid device;
@@ -242,6 +244,16 @@ struct StreamInitInfo {
   cubeb_stream_params params;
   uint32_t latency_frames;
 };
+
+void create_input_stream(StreamInitInfo * info)
+{
+  assert(info);
+  info->init_result = cubeb_stream_init(info->ctx, &(info->stream),
+                                        "Cubeb input", info->device,
+                                        &(info->params), NULL, NULL,
+                                        info->latency_frames, data_cb_input,
+                                        state_cb_input, nullptr);
+}
 
 long cb_duplex(cubeb_stream * stream, void * user, const void * inputbuffer, void * outputbuffer, long nframes)
 {
@@ -261,12 +273,8 @@ long cb_duplex(cubeb_stream * stream, void * user, const void * inputbuffer, voi
   }
 
   if (!info->used) {
+    info->t = std::thread(create_input_stream, info);
     info->used = true;
-    info->init_result = cubeb_stream_init(info->ctx, &(info->stream),
-                                          "Cubeb input", info->device,
-                                          &(info->params), NULL, NULL,
-                                          info->latency_frames, data_cb_input,
-                                          state_cb_input, nullptr);
   }
 
   return nframes;
@@ -340,6 +348,7 @@ TEST(cubeb, one_duplex_one_input)
   delay(500);
 
   while (!info.used);
+  info.t.join();
 
   ASSERT_EQ(info.init_result, CUBEB_OK) << "Error initializing input-only cubeb stream";
 
