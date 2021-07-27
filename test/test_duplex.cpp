@@ -196,13 +196,13 @@ void state_cb_input(cubeb_stream * stream, void * /*user*/, cubeb_state state)
 
   switch (state) {
   case CUBEB_STATE_STARTED:
-    fprintf(stderr, "stream started\n"); break;
+    fprintf(stderr, "input-only stream started\n"); break;
   case CUBEB_STATE_STOPPED:
-    fprintf(stderr, "stream stopped\n"); break;
+    fprintf(stderr, "input-only stream stopped\n"); break;
   case CUBEB_STATE_DRAINED:
-    fprintf(stderr, "stream drained\n"); break;
+    fprintf(stderr, "input-only stream drained\n"); break;
   case CUBEB_STATE_ERROR:
-    fprintf(stderr, "stream runs into error state\n"); break;
+    fprintf(stderr, "input-only stream runs into error state\n"); break;
   default:
     fprintf(stderr, "unknown stream state %d\n", state);
   }
@@ -230,6 +230,46 @@ std::vector<cubeb_devid> get_devices(cubeb * ctx, cubeb_device_type type) {
   cubeb_device_collection_destroy(ctx, &collection);
 
   return devices;
+}
+
+// Input only
+struct StreamInitInfo {
+  bool used = false;
+  int init_result = CUBEB_ERROR;
+  cubeb * ctx;
+  cubeb_devid device;
+  cubeb_stream * stream;
+  cubeb_stream_params params;
+  uint32_t latency_frames;
+};
+
+long cb_duplex(cubeb_stream * stream, void * user, const void * inputbuffer, void * outputbuffer, long nframes)
+{
+  assert(user);
+  StreamInitInfo * info = reinterpret_cast<StreamInitInfo*>(user);
+  float *ib = (float *)inputbuffer;
+  float *ob = (float *)outputbuffer;
+
+  if (stream == NULL || inputbuffer == NULL || outputbuffer == NULL) {
+    return CUBEB_ERROR;
+  }
+
+  long output_index = 0;
+  for (long i = 0; i < nframes; i++) {
+    ob[output_index] = ob[output_index + 1] = ib[i];
+    output_index += 2;
+  }
+
+  if (!info->used) {
+    info->used = true;
+    info->init_result = cubeb_stream_init(info->ctx, &(info->stream),
+                                          "Cubeb input", info->device,
+                                          &(info->params), NULL, NULL,
+                                          info->latency_frames, data_cb_input,
+                                          state_cb_input, nullptr);
+  }
+
+  return nframes;
 }
 
 TEST(cubeb, one_duplex_one_input)
@@ -280,9 +320,16 @@ TEST(cubeb, one_duplex_one_input)
   r = cubeb_get_min_latency(ctx, &output_params, &latency_frames);
   ASSERT_EQ(r, CUBEB_OK) << "Could not get minimal latency";
 
+  StreamInitInfo info;
+  info.ctx = ctx;
+  info.device = input_only;
+  info.stream = nullptr;
+  info.params = input_params;
+  info.latency_frames = latency_frames;
+
   r = cubeb_stream_init(ctx, &duplex_stream, "Cubeb duplex",
                         duplex_input, &input_params, duplex_output, &output_params,
-                        latency_frames, data_cb_duplex, state_cb_duplex, &duplex_stream_state);
+                        latency_frames, cb_duplex, state_cb_duplex, &info);
   ASSERT_EQ(r, CUBEB_OK) << "Error initializing duplex cubeb stream";
 
   std::unique_ptr<cubeb_stream, decltype(&cubeb_stream_destroy)>
@@ -292,24 +339,20 @@ TEST(cubeb, one_duplex_one_input)
   ASSERT_EQ(r, CUBEB_OK) << "Could not start duplex stream";
   delay(500);
 
-  cubeb_stream *input_stream;
-  r = cubeb_stream_init(ctx, &input_stream, "Cubeb input",
-                        input_only, &input_params, NULL, NULL,
-                        latency_frames, data_cb_input, state_cb_input, nullptr);
-  ASSERT_EQ(r, CUBEB_OK) << "Error initializing input-only cubeb stream";
+  while (!info.used);
+
+  ASSERT_EQ(info.init_result, CUBEB_OK) << "Error initializing input-only cubeb stream";
 
   std::unique_ptr<cubeb_stream, decltype(&cubeb_stream_destroy)>
-    cleanup_input_stream_at_exit(input_stream, cubeb_stream_destroy);
+    cleanup_input_stream_at_exit(info.stream, cubeb_stream_destroy);
   
-  r = cubeb_stream_start(input_stream);
+  r = cubeb_stream_start(info.stream);
   ASSERT_EQ(r, CUBEB_OK) << "Could not start input stream";
   delay(500);
 
   r = cubeb_stream_stop(duplex_stream);
   ASSERT_EQ(r, CUBEB_OK) << "Could not stop duplex stream";
 
-  r = cubeb_stream_stop(input_stream);
+  r = cubeb_stream_stop(info.stream);
   ASSERT_EQ(r, CUBEB_OK) << "Could not stop input stream";
-
-  ASSERT_FALSE(duplex_stream_state.invalid_audio_value.load());
 }
